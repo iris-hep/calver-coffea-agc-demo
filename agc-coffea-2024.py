@@ -35,6 +35,7 @@
 from pathlib import Path
 
 import awkward as ak
+import dask
 import dask_awkward as dak
 import hist.dask
 import coffea
