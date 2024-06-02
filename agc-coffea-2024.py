@@ -257,7 +257,8 @@ fileset = utils.file_input.construct_fileset(N_FILES_MAX_PER_SAMPLE)
 # %%
 # %%time
 # pre-process
-samples, _ = dataset_tools.preprocess(fileset, step_size=250_000)
+step_size = utils.config.config["benchmarking"]["STEPSIZE"]
+samples, _ = dataset_tools.preprocess(fileset, step_size)
 
 # workaround for https://github.com/CoffeaTeam/coffea/issues/1050 (metadata gets dropped, already fixed)
 for k, v in samples.items():
@@ -277,6 +278,13 @@ tasks = dataset_tools.apply_to_fileset(create_histograms, samples, uproot_option
 ((out, report),) = dask.compute(tasks)  # feels strange that this is a tuple-of-tuple
 
 print(f"total time spent in uproot reading data (or some related metric?): {ak.sum([v['duration'] for v in report.values()]):.2f} s")
+exec_time =  ak.sum([v['duration'] for v in report.values()])
+
+# %%
+metrics = {}
+
+# %%
+utils.metrics.track_metrics(metrics, fileset, exec_time, N_FILES_MAX_PER_SAMPLE)
 
 # %% [markdown]
 # To visualize the results, we need to first stack the serperate histograms that were computed individually
