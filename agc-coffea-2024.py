@@ -71,9 +71,9 @@ print(f"coffea: {coffea.__version__}")
 # %%
 def calculate_trijet_mass(events):
     # pT > 30 GeV for leptons, > 25 GeV for jets
-    selected_electrons = events.Electron[events.Electron.pt > 30 & (np.abs(events.Electron.eta) < 2.1)]
-    selected_muons = events.Muon[events.Muon.pt > 30 & (np.abs(events.Muon.eta) < 2.1)]
-    selected_jets = events.Jet[events.Jet.pt > 25 & (np.abs(events.Jet.eta) < 2.4)]
+    selected_electrons = events.Electron[(events.Electron.pt > 30) & (np.abs(events.Electron.eta) < 2.1)]
+    selected_muons = events.Muon[(events.Muon.pt > 30) & (np.abs(events.Muon.eta) < 2.1)]
+    selected_jets = events.Jet[(events.Jet.pt > 25) & (np.abs(events.Jet.eta) < 2.4)]
 
     # single lepton requirement
     event_filters = ((ak.count(selected_electrons.pt, axis=1) + ak.count(selected_muons.pt, axis=1)) == 1)
