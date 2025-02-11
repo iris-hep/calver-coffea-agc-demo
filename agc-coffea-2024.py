@@ -59,14 +59,7 @@ utils.plotting.set_style()
 warnings.filterwarnings("ignore")
 NanoAODSchema.warn_missing_crossrefs = False # silences warnings about branches we will not use here
 
-import getpass
-whoami_output = getpass.getuser()
-if whoami_output == "cms-jovyan":
-    client = Client("tls://localhost:8786")
-else:
-    from dask.distributed import LocalCluster
-    cluster = LocalCluster(n_workers=1, threads_per_worker=1)
-    client = Client(cluster)
+client = Client("tls://localhost:8786")
 
 print(f"awkward: {ak.__version__}")
 print(f"dask-awkward: {dak.__version__}")
