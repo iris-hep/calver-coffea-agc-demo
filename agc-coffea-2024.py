@@ -19,7 +19,7 @@
 #     name: python
 #     nbconvert_exporter: python
 #     pygments_lexer: ipython3
-#     version: 3.10.12
+#     version: 3.12.8
 # ---
 
 # %% [markdown]
@@ -42,19 +42,22 @@ import coffea
 import numpy as np
 import uproot
 from dask.distributed import Client
+import cloudpickle
+import matplotlib.pyplot as plt
 
 from coffea.nanoevents import NanoEventsFactory, NanoAODSchema
 from coffea.analysis_tools import PackedSelection
 from coffea import dataset_tools
+import correctionlib
 
 import warnings
 
 import utils
+from utils.systematics import rand_gauss
 utils.plotting.set_style()
 
 warnings.filterwarnings("ignore")
 NanoAODSchema.warn_missing_crossrefs = False # silences warnings about branches we will not use here
-
 
 client = Client("tls://localhost:8786")
 
@@ -117,6 +120,7 @@ hist_reco_mtop = hist.dask.Hist.new.Reg(16, 0, 375, label="$m_{bjj}$").Double().
 # perform computation and visualize
 artists = hist_reco_mtop.compute().plot()
 
+
 # %%
 # and annotate the visualization
 fig_dir = Path.cwd() / "figures"
@@ -134,22 +138,17 @@ fig
 
 # %% [markdown]
 # This all matches the (non-Dask) versions of the plots from last summer — see the notebook linked above. Not surprising, but reassuring!
-
-# %% [markdown]
+#
 # ### Time for coffea
-
-# %% [markdown]
+#
 # We'll first write the functions to compute the observable and do the histogramming using `awkward-dask` and `hist.dask` again
 
 # %%
 B_TAG_THRESHOLD = 0.5
+cset = correctionlib.CorrectionSet.from_file("corrections.json")
 
 # perform object selection
-def object_selection(events):
-    elecs = events.Electron
-    muons = events.Muon
-    jets = events.Jet
-
+def object_selection(elecs, muons, jets):
     electron_reqs = (elecs.pt > 30) & (np.abs(elecs.eta) < 2.1) & (elecs.cutBased == 4) & (elecs.sip3d < 4)
     muon_reqs = ((muons.pt > 30) & (np.abs(muons.eta) < 2.1) & (muons.tightId) & (muons.sip3d < 4) &
                  (muons.pfRelIso04_all < 0.15))
@@ -176,7 +175,7 @@ def region_selection(elecs, muons, jets):
     selections.add("4j1b", selections.all("exactly_1l", "atleast_4j", "exactly_1b"))
     selections.add("4j2b", selections.all("exactly_1l", "atleast_4j", "atleast_2b"))
 
-    return selections.all("4j1b"), selections.all("4j2b")
+    return selections
 
 
 # observable calculation for 4j2b
@@ -210,6 +209,8 @@ def create_histograms(events):
         .Weight()
     )
 
+    hist_dict = {"4j1b": hist_4j1b, "4j2b": hist_4j2b}
+
     process = events.metadata["process"]  # "ttbar" etc.
     variation = events.metadata["variation"]  # "nominal" etc.
     process_label = events.metadata["process_label"]  # nicer LaTeX labels
@@ -223,20 +224,66 @@ def create_histograms(events):
     else:
         xsec_weight = 1
 
-    elecs, muons, jets = object_selection(events)
+    events["pt_scale_up"] = 1.03
+    events["pt_res_up"] = dak.map_partitions(rand_gauss, events.Jet.pt)
 
-    # region selection
-    selection_4j1b, selection_4j2b = region_selection(elecs, muons, jets)
+    syst_variations = ["nominal"]
+    jet_kinematic_systs = ["pt_scale_up", "pt_res_up"]
+    event_systs = [f"btag_var_{i}" for i in range(4)]
+    if process == "wjets":
+        event_systs.append("scale_var")
+    
+    if variation == "nominal":
+        syst_variations.extend(jet_kinematic_systs)
+        syst_variations.extend(event_systs)
+    
+    for syst_var in syst_variations:
+        elecs = events.Electron
+        muons = events.Muon
+        jets = events.Jet
 
-    # 4j1b: HT
-    observable_4j1b = ak.sum(jets[selection_4j1b].pt, axis=-1)
-    hist_4j1b.fill(observable_4j1b, weight=xsec_weight, process=process_label, variation=variation)
+        if syst_var in jet_kinematic_systs:
+            jets["pt"] = jets.pt * events[syst_var]
+    
+        elecs, muons, jets = object_selection(elecs, muons, jets)
 
-    # 4j2b: m_reco_top
-    observable_4j2b = calculate_m_reco_top(jets[selection_4j2b])
-    hist_4j2b.fill(observable_4j2b, weight=xsec_weight, process=process_label, variation=variation)
+        # region selection
+        selections = region_selection(elecs, muons, jets)
 
-    return {"4j1b": hist_4j1b, "4j2b": hist_4j2b}
+        for region in hist_dict:
+            selection = selections.all(region)
+            region_jets = jets[selection]
+            region_weights = dak.ones_like(dak.num(region_jets, axis=1)) * xsec_weight
+            if region == "4j1b":
+                observable = ak.sum(region_jets.pt, axis=-1)
+            elif region == "4j2b":
+                observable = calculate_m_reco_top(region_jets)
+            syst_var_name = f"{syst_var}"
+            if syst_var in event_systs:
+                for i_dir, direction in enumerate(["up", "down"]):
+                    if syst_var == "scale_var":
+                        wgt_variation = cset["event_systematics"].evaluate("scale_var", direction, region_jets.pt[:, 0])
+                    elif syst_var.startswith("btag_var"):
+                        i_jet = int(syst_var.rsplit("_",1)[-1])
+                        wgt_variation = cset["event_systematics"].evaluate("btag_var", direction, region_jets.pt[:,i_jet])
+                    syst_var_name = f"{syst_var}_{direction}"
+                    hist_dict[region].fill(
+                        observable,
+                        process=process_label,
+                        variation=syst_var_name,
+                        weight=region_weights * wgt_variation,
+                    )
+            else:
+                if variation != "nominal":
+                    syst_var_name = variation
+                hist_dict[region].fill(
+                    observable,
+                    process=process_label,
+                    variation=syst_var_name,
+                    weight=region_weights,
+                )
+
+    return hist_dict
 
 
 # %% [markdown]
@@ -263,8 +310,10 @@ samples, _ = dataset_tools.preprocess(fileset, step_size=250_000)
 for k, v in samples.items():
     v["metadata"] = fileset[k]["metadata"]
 
+
 # %%
 # %%time
+cloudpickle.register_pickle_by_value(utils) # serialize methods and objects in utils so that they can be accessed within the coffea processor
 # create the task graph
 tasks = dataset_tools.apply_to_fileset(create_histograms, samples, uproot_options={"allow_read_errors_with_report": True})
 
@@ -286,6 +335,7 @@ print(f"total time spent in uproot reading data (or some related metric?): {ak.s
 full_histogram_4j1b = sum([v["4j1b"] for v in out.values()])
 full_histogram_4j2b = sum([v["4j2b"] for v in out.values()])
 
+
 # %%
 artists = full_histogram_4j1b[120j::hist.rebin(2), :, "nominal"].stack("process")[::-1].plot(
     stack=True, histtype="fill", linewidth=1,edgecolor="grey"
@@ -298,6 +348,7 @@ ax.legend(frameon=False)
 ax.set_title(">= 4 jets, 1 b-tag");
 
 fig.savefig(fig_dir / "coffea_4j_1b.png", dpi=300)
+
 
 # %%
 artists = full_histogram_4j2b[:, :, "nominal"].stack("process")[::-1].plot(
@@ -312,14 +363,37 @@ ax.set_title(">= 4 jets, >= 2 b-tags");
 
 fig.savefig(fig_dir / "coffea_4j_2b.png", dpi=300)
 
-# %% [markdown]
-# This is a plot you can compare to the one in the full AGC notebook — you'll notice they look the same. Success!
+
+# %%
+# b-tagging variations
+ttbar_label = '$t\\bar{t}$'
+full_histogram_4j1b[120j::hist.rebin(2), ttbar_label, "nominal"].plot(label="nominal", linewidth=2)
+full_histogram_4j1b[120j::hist.rebin(2), ttbar_label, "btag_var_0_up"].plot(label="NP 1", linewidth=2)
+full_histogram_4j1b[120j::hist.rebin(2), ttbar_label, "btag_var_1_up"].plot(label="NP 2", linewidth=2)
+full_histogram_4j1b[120j::hist.rebin(2), ttbar_label, "btag_var_2_up"].plot(label="NP 3", linewidth=2)
+full_histogram_4j1b[120j::hist.rebin(2), ttbar_label, "btag_var_3_up"].plot(label="NP 4", linewidth=2)
+plt.legend(frameon=False)
+plt.xlabel("$H_T$ [GeV]")
+plt.title("b-tagging variations");
+
+
+# %%
+# jet energy scale variations
+full_histogram_4j2b[:, ttbar_label, "nominal"].plot(label="nominal", linewidth=2)
+full_histogram_4j2b[:, ttbar_label, "pt_scale_up"].plot(label="scale up", linewidth=2)
+full_histogram_4j2b[:, ttbar_label, "pt_res_up"].plot(label="resolution up", linewidth=2)
+plt.legend(frameon=False)
+plt.xlabel("$m_{bjj}$ [Gev]")
+plt.title("Jet energy variations");
 
 # %% [markdown]
+# This is a plot you can compare to the one in the full AGC notebook — you'll notice they look the same. Success!
+#
 # If we now investigate the task graph for the nominal $t\bar{t}$ sample in the optimzied view, which hides from us some of the complexity of the graph we created.
 
 # %%
 tasks[0]["ttbar__nominal"]["4j2b"].visualize(optimize_graph=True)
+
 
 # %%
 # "100 layers is a large task graph" on IRIS-HEP Slack, 100 layers happen quickly!
@@ -327,6 +401,8 @@ for region in ["4j1b", "4j2b"]:
     for process, task in tasks[0].items():
         print(f"{process:>30} {region} {len(task[region].dask.layers)}")
 
+
 # %%
 # columns getting read for a given task
 dak.necessary_columns(tasks[0]["ttbar__nominal"]["4j2b"])
+
