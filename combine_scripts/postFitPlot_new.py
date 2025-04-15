@@ -16,6 +16,7 @@ parser.add_argument(
     "--shape_type", dest="shape_type", help="Shape directory in input ROOT file from fitDiagnostics (e.g. shapes_fit_b, shapes_fit_s)", required=True
 )
 parser.add_argument("--region", dest="cards_dir", help="Region of interest (e.g. signal_region, ch1, ch2, etc.)", required=True)
+parser.add_argument("--extra_suffix", dest="extra_suffix", required=False, default="")
 args = parser.parse_args()
 
 canvas = ROOT.TCanvas()
@@ -46,9 +47,13 @@ h_total.Add(h_sig)  # Sum signal and background histograms
 
 h_err = h_total.Clone("h_err")
 for i in range(1, h_err.GetNbinsX() + 1):
-    bkg_err = h_bkg.GetBinError(i)
-    sig_err = h_sig.GetBinError(i)
+    # add small quantity to fix problem with ROOT plotting - shade is shown anyways if error is 0
+    bkg_err = h_bkg.GetBinError(i) + 10**-3
+    #print(bkg_err)
+    sig_err = h_sig.GetBinError(i) + 10**-3
+    #print(sig_err)
     total_err = (bkg_err**2 + sig_err**2) ** 0.5  # Quadrature sum
+    #print(total_err)
     h_err.SetBinError(i, total_err)
 
 h_err.SetFillColorAlpha(12, 0.3)  # Grey uncertainty band
@@ -121,5 +126,5 @@ legend.AddEntry(h_err, "Total uncertainty", "F")
 legend.Draw()
 
 # Save the plot
-canvas.SaveAs("combine_plots/stacked_plot_%s_%s.png" % (first_dir, second_dir))
-canvas.SaveAs("combine_plots/stacked_plot_%s_%s.pdf" % (first_dir, second_dir))
+canvas.SaveAs("combine_plots/stacked_plot_%s_%s%s.png" % (first_dir, second_dir, args.extra_suffix))
+canvas.SaveAs("combine_plots/stacked_plot_%s_%s%s.pdf" % (first_dir, second_dir, args.extra_suffix))

@@ -161,3 +161,9 @@ cython_debug/
 
 figures/
 histograms/
+higgsCombine*
+all_histograms*
+fitDiagnostics*
+combine_logger.out
+combine_plots
+impacts*.json
