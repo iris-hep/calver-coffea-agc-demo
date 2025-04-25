@@ -1,6 +1,6 @@
-# AGC Demo Day #4: AGC + coffea 2024
+# AGC + coffea 2025 + Combine
 
-This is a quick demo showcasing a part of the [AGC](https://agc.readthedocs.io/) running with [`coffea` 2024](https://github.com/CoffeaTeam/coffea) on coffea-casa, presented in the context of [AGC Demo Day #4](https://indico.cern.ch/e/agc-demo-day-4).
+This is a quick demo showcasing a part of the [AGC](https://agc.readthedocs.io/) running with [`coffea` 2025](https://github.com/CoffeaTeam/coffea) on coffea-casa, and with the statistical inference part performed using [Combine](https://cms-analysis.github.io/HiggsAnalysis-CombinedLimit/latest/).
 
 ## Environment revisions
 
