@@ -167,3 +167,4 @@ fitDiagnostics*
 combine_logger.out
 combine_plots
 impacts*.json
+datacard_by_hand.root

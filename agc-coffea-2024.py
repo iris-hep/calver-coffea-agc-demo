@@ -1,17 +1,50 @@
-#!/usr/bin/env python
-# coding: utf-8
+# ---
+# jupyter:
+#   jupytext:
+#     notebook_metadata_filter: all,-jupytext.text_representation.jupytext_version
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+#   kernelspec:
+#     display_name: Python 3 (ipykernel)
+#     language: python
+#     name: python3
+#   language_info:
+#     codemirror_mode:
+#       name: ipython
+#       version: 3
+#     file_extension: .py
+#     mimetype: text/x-python
+#     name: python
+#     nbconvert_exporter: python
+#     pygments_lexer: ipython3
+#     version: 3.12.9
+# ---
 
-# # AGC + calver coffea on coffea-casa
-# 
+# %% [markdown]
+# # AGC + calver coffea on coffea-casa: CMS Open Data $t\bar{t}$
+#
 # We'll base this on a few sources:
 # - https://github.com/iris-hep/analysis-grand-challenge/tree/main/analyses/cms-open-data-ttbar (AGC, of course)
 # - https://github.com/alexander-held/CompHEP-2023-AGC (contains a simplified version of AGC)
 # - https://github.com/nsmith-/TTGamma_LongExercise/ (credit Nick Smith for helpful examples of the new API)
 # - (and if time allows, weight features: https://github.com/CoffeaTeam/coffea/blob/backports-v0.7.x/binder/accumulators.ipynb / https://coffeateam.github.io/coffea/api/coffea.analysis_tools.Weights.html#coffea.analysis_tools.Weights.partial_weight)
 
-# In[1]:
+# %% [markdown]
+# We are using [2015 CMS Open Data](https://cms.cern/news/first-cms-open-data-lhc-run-2-released) in this demonstration to showcase an analysis pipeline.
+# This is a **technical demonstration**. We are including the relevant workflow aspects that physicists need in their work, but we are not focusing on making every piece of the demonstration physically meaningful. This concerns in particular systematic uncertainties: we capture the workflow, but the actual implementations are more complex in practice. If you are interested in the physics side of analyzing top pair production, check out the latest results from [ATLAS](https://twiki.cern.ch/twiki/bin/view/AtlasPublic/TopPublicResults) and [CMS](https://cms-results.web.cern.ch/cms-results/public-results/preliminary-results/)!
 
+# %% [markdown]
+# This notebook implements most of the analysis pipeline shown in the following picture, using the tools also mentioned there:
+# ![ecosystem visualization](figures/pipe.001.jpeg)
+#
+# This version also includes the Combine tool to perform model building ans statistical inference. Despite not strictly being part of the ecosystem, it is widely used in the CMS collaboration, so in this tutorial we will see an example of statistical inference performed with it.
 
+# %% [markdown]
+# ## Imports: setting up the environment
+
+# %%
 from pathlib import Path
 
 import awkward as ak
@@ -55,11 +88,10 @@ print(f"hist: {hist.__version__}")
 print(f"coffea: {coffea.__version__}")
 
 
-# ### Produce an AGC histogram with Dask (no coffea yet)
+# %% [markdown]
+# ## Produce an AGC histogram with Dask (no coffea yet)
 
-# In[2]:
-
-
+# %%
 def calculate_trijet_mass(events):
     # pT > 30 GeV for leptons, > 25 GeV for jets
     selected_electrons = events.Electron[events.Electron.pt > 30 & (np.abs(events.Electron.eta) < 2.1)]
@@ -87,11 +119,10 @@ def calculate_trijet_mass(events):
     return ak.flatten(trijet_mass)
 
 
+# %% [markdown]
 # Reading in the ROOT file, we can now create a Dask task graph for the calculations and plot that we want to make using `dask-awkward` and `hist.dask`
 
-# In[3]:
-
-
+# %%
 ttbar_file = "https://xrootd-local.unl.edu:1094//store/user/AGC/nanoAOD/"\
     "TT_TuneCUETP8M1_13TeV-powheg-pythia8/cmsopendata2015_ttbar_19981_PU25nsData2015v1_76X_"\
     "mcRun2_asymptotic_v12_ext4-v1_80000_0007.root"
@@ -102,19 +133,14 @@ events = NanoEventsFactory.from_root({ttbar_file: "Events"}, schemaclass=NanoAOD
 reconstructed_top_mass = calculate_trijet_mass(events)
 hist_reco_mtop = hist.dask.Hist.new.Reg(16, 0, 375, label="$m_{bjj}$").Double().fill(reconstructed_top_mass)
 
-
+# %% [markdown]
 # and then once we're ready we can execute the task graph with `.compute()` to get our visualization
 
-# In[4]:
-
-
+# %%
 # perform computation and visualize
 artists = hist_reco_mtop.compute().plot()
 
-
-# In[5]:
-
-
+# %%
 # and annotate the visualization
 fig_dir = Path.cwd() / "figures"
 fig_dir.mkdir(parents=True, exist_ok=True)
@@ -129,16 +155,16 @@ ax.set_ylim([0, 8000])
 fig.savefig(fig_dir / "trijet_mass.png", dpi=300)
 fig
 
-
+# %% [markdown]
 # This all matches the (non-Dask) versions of the plots from last summer — see the notebook linked above. Not surprising, but reassuring!
 
-# ### Time for coffea
+# %% [markdown]
+# ## Time for coffea
 
+# %% [markdown]
 # We'll first write the functions to compute the observable and do the histogramming using `awkward-dask` and `hist.dask` again
 
-# In[6]:
-
-
+# %%
 B_TAG_THRESHOLD = 0.5
 cset = correctionlib.CorrectionSet.from_file("corrections.json")
 
@@ -191,14 +217,14 @@ def calculate_m_reco_top(jets):
 # create histograms with observables
 def create_histograms(events):
     hist_4j1b = (
-        hist.dask.Hist.new.Reg(25, 50, 550, name="HT", label=r"$H_T$ [GeV]")
+        hist.dask.Hist.new.Reg(11, 110, 550, name="HT", label=r"$H_T$ [GeV]")
         .StrCat([], name="process", label="Process", growth=True)
         .StrCat([], name="variation", label="Systematic variation", growth=True)
         .Weight()
     )
 
     hist_4j2b = (
-        hist.dask.Hist.new.Reg(25, 50, 550, name="m_reco_top", label=r"$m_{bjj}$ [GeV]")
+        hist.dask.Hist.new.Reg(11, 110, 550, name="m_reco_top", label=r"$m_{bjj}$ [GeV]")
         .StrCat([], name="process", label="Process", growth=True)
         .StrCat([], name="variation", label="Systematic variation", growth=True)
         .Weight()
@@ -208,7 +234,7 @@ def create_histograms(events):
 
     process = events.metadata["process"]  # "ttbar" etc.
     variation = events.metadata["variation"]  # "nominal" etc.
-    process_label = events.metadata["process_label"]  # nicer LaTeX labels
+    #process_label = events.metadata["process_label"]  # nicer LaTeX labels
 
     # normalization for MC
     x_sec = events.metadata["xsec"]
@@ -264,7 +290,7 @@ def create_histograms(events):
                     syst_var_name = f"{syst_var}_{direction}"
                     hist_dict[region].fill(
                         observable,
-                        process=process_label,
+                        process=process,
                         variation=syst_var_name,
                         weight=region_weights * wgt_variation,
                     )
@@ -273,7 +299,7 @@ def create_histograms(events):
                     syst_var_name = variation
                 hist_dict[region].fill(
                     observable,
-                    process=process_label,
+                    process=process,
                     variation=syst_var_name,
                     weight=region_weights,
                 )
@@ -281,56 +307,61 @@ def create_histograms(events):
     return hist_dict
 
 
-# and prepare the fileset we need
+# %% [markdown]
+# and prepare the fileset we need. More information on how the dataset was prepared can be found [here](https://github.com/iris-hep/analysis-grand-challenge/blob/main/analyses/cms-open-data-ttbar/ttbar_analysis_pipeline.ipynb).
 
-# In[7]:
-
-
+# %%
 # fileset preparation
-N_FILES_MAX_PER_SAMPLE = 1
+N_FILES_MAX_PER_SAMPLE = 4
 # compared to coffea 0.7: list of file paths becomes list of dicts (path: trename)
 fileset = utils.file_input.construct_fileset(N_FILES_MAX_PER_SAMPLE)
 
 # fileset = {"ttbar__nominal": fileset["ttbar__nominal"]}  # to only process nominal ttbar
 # fileset
 
-
+# %% [markdown]
 # Now we can start using `coffea` with its Dask capabilities. One of the things we need to do is to build the full task graph, which requires looping over all the sample variations (`samples`)
 
-# In[8]:
+# %%
+# %%time
+# pre-process
+samples, _ = dataset_tools.preprocess(fileset, step_size=250_000)
 
+# workaround for https://github.com/CoffeaTeam/coffea/issues/1050 (metadata gets dropped, already fixed)
+for k, v in samples.items():
+    v["metadata"] = fileset[k]["metadata"]
 
-get_ipython().run_cell_magic('time', '', '# pre-process\nsamples, _ = dataset_tools.preprocess(fileset, step_size=250_000)\n\n# workaround for https://github.com/CoffeaTeam/coffea/issues/1050 (metadata gets dropped, already fixed)\nfor k, v in samples.items():\n    v["metadata"] = fileset[k]["metadata"]\n')
+# %%
+# %%time
+cloudpickle.register_pickle_by_value(utils) # serialize methods and objects in utils so that they can be accessed within the coffea processor
+# create the task graph
+tasks = dataset_tools.apply_to_fileset(create_histograms, samples, uproot_options={"allow_read_errors_with_report": True})
 
-
-# In[9]:
-
-
-get_ipython().run_cell_magic('time', '', 'cloudpickle.register_pickle_by_value(utils) # serialize methods and objects in utils so that they can be accessed within the coffea processor\n# create the task graph\ntasks = dataset_tools.apply_to_fileset(create_histograms, samples, uproot_options={"allow_read_errors_with_report": True})\n')
-
-
+# %% [markdown]
 # and then we can finally execute the full task graph with Dask
 
-# In[10]:
+# %%
+# %%time
+# execute
+((out, report),) = dask.compute(tasks)  # feels strange that this is a tuple-of-tuple
 
+print(f"total time spent in uproot reading data (or some related metric?): {ak.sum([v['duration'] for v in report.values()]):.2f} s")
 
-get_ipython().run_cell_magic('time', '', '# execute\n((out, report),) = dask.compute(tasks)  # feels strange that this is a tuple-of-tuple\n\nprint(f"total time spent in uproot reading data (or some related metric?): {ak.sum([v[\'duration\'] for v in report.values()]):.2f} s")\n')
-
-
+# %% [markdown]
 # To visualize the results, we need to first stack the serperate histograms that were computed individually
 
-# In[11]:
-
-
+# %%
 # stack all the histograms together (we processed each sample separately)
 full_histogram_4j1b = sum([v["4j1b"] for v in out.values()])
 full_histogram_4j2b = sum([v["4j2b"] for v in out.values()])
 
+# %%
+# dump for stats inference with also pseudodata
+for region, histogram in [("bin4j1b", full_histogram_4j1b), ("bin4j2b", full_histogram_4j2b)]:
+    utils.file_output.save_histograms(histogram, f"all_histograms_fps{N_FILES_MAX_PER_SAMPLE}_{region}.root")
 
-# In[12]:
-
-
-artists = full_histogram_4j1b[120j::hist.rebin(2), :, "nominal"].stack("process")[::-1].plot(
+# %%
+artists = full_histogram_4j1b[120j::hist.rebin(1), :, "nominal"].stack("process")[::-1].plot(
     stack=True, histtype="fill", linewidth=1,edgecolor="grey"
 )
 
@@ -342,10 +373,7 @@ ax.set_title(">= 4 jets, 1 b-tag");
 
 fig.savefig(fig_dir / "coffea_4j_1b.png", dpi=300)
 
-
-# In[13]:
-
-
+# %%
 artists = full_histogram_4j2b[:, :, "nominal"].stack("process")[::-1].plot(
     stack=True, histtype="fill", linewidth=1,edgecolor="grey"
 )
@@ -358,25 +386,22 @@ ax.set_title(">= 4 jets, >= 2 b-tags");
 
 fig.savefig(fig_dir / "coffea_4j_2b.png", dpi=300)
 
+# %% [markdown]
+# **Note**: the histogram for $m_{bjj}$ looks slightly different from the one in [the main AGC repo](https://github.com/iris-hep/analysis-grand-challenge/blob/main/analyses/cms-open-data-ttbar/ttbar_analysis_pipeline.ipynb). This is because we are already producing the histogram with the binning used for the statistical inference part, instead of rebenning after producing it.
 
-# In[14]:
-
-
+# %%
 # b-tagging variations
-ttbar_label = '$t\\bar{t}$'
-full_histogram_4j1b[120j::hist.rebin(2), ttbar_label, "nominal"].plot(label="nominal", linewidth=2)
-full_histogram_4j1b[120j::hist.rebin(2), ttbar_label, "btag_var_0_up"].plot(label="NP 1", linewidth=2)
-full_histogram_4j1b[120j::hist.rebin(2), ttbar_label, "btag_var_1_up"].plot(label="NP 2", linewidth=2)
-full_histogram_4j1b[120j::hist.rebin(2), ttbar_label, "btag_var_2_up"].plot(label="NP 3", linewidth=2)
-full_histogram_4j1b[120j::hist.rebin(2), ttbar_label, "btag_var_3_up"].plot(label="NP 4", linewidth=2)
+ttbar_label = 'ttbar'
+full_histogram_4j1b[120j::hist.rebin(1), ttbar_label, "nominal"].plot(label="nominal", linewidth=2)
+full_histogram_4j1b[120j::hist.rebin(1), ttbar_label, "btag_var_0_up"].plot(label="NP 1", linewidth=2)
+full_histogram_4j1b[120j::hist.rebin(1), ttbar_label, "btag_var_1_up"].plot(label="NP 2", linewidth=2)
+full_histogram_4j1b[120j::hist.rebin(1), ttbar_label, "btag_var_2_up"].plot(label="NP 3", linewidth=2)
+full_histogram_4j1b[120j::hist.rebin(1), ttbar_label, "btag_var_3_up"].plot(label="NP 4", linewidth=2)
 plt.legend(frameon=False)
 plt.xlabel("$H_T$ [GeV]")
 plt.title("b-tagging variations");
 
-
-# In[15]:
-
-
+# %%
 # jet energy scale variations
 full_histogram_4j2b[:, ttbar_label, "nominal"].plot(label="nominal", linewidth=2)
 full_histogram_4j2b[:, ttbar_label, "pt_scale_up"].plot(label="scale up", linewidth=2)
@@ -385,35 +410,21 @@ plt.legend(frameon=False)
 plt.xlabel("$m_{bjj}$ [Gev]")
 plt.title("Jet energy variations");
 
-
+# %% [markdown]
 # This is a plot you can compare to the one in the full AGC notebook — you'll notice they look the same. Success!
 
+# %% [markdown]
 # If we now investigate the task graph for the nominal $t\bar{t}$ sample in the optimzied view, which hides from us some of the complexity of the graph we created.
 
-# In[16]:
-
-
+# %%
 tasks[0]["ttbar__nominal"]["4j2b"].visualize(optimize_graph=True)
 
-
-# In[17]:
-
-
+# %%
 # "100 layers is a large task graph" on IRIS-HEP Slack, 100 layers happen quickly!
 for region in ["4j1b", "4j2b"]:
     for process, task in tasks[0].items():
         print(f"{process:>30} {region} {len(task[region].dask.layers)}")
 
-
-# In[18]:
-
-
+# %%
 # columns getting read for a given task
 dak.necessary_columns(tasks[0]["ttbar__nominal"]["4j2b"])
-
-
-# In[ ]:
-
-
-
-
