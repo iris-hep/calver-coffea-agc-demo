@@ -159,8 +159,10 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-figures/
 histograms/
+figures/coffea_4j_1b.png
+figures/coffea_4j_2b.png
+figures/trijet_mass.png
 higgsCombine*
 all_histograms*
 fitDiagnostics*
