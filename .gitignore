@@ -160,6 +160,9 @@ cython_debug/
 #.idea/
 
 histograms/
+figures/coffea_4j_1b.png
+figures/coffea_4j_2b.png
+figures/trijet_mass.png
 higgsCombine*
 all_histograms*
 fitDiagnostics*
