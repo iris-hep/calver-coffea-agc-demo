@@ -140,10 +140,12 @@ os.makedirs("combine_plots", exist_ok=True)
 # !text2workspace.py datacard_by_hand.txt --PO 'map=.*/ttbar:r[1.0,0.0,3.0]'
 
 # %% [markdown]
-# ## Impacts
+# ## Impacts and pulls
 #
 # In most (all) the analyses approval procedures, it is required to check the impact of the nuisance parameters (NP) on the parameter of interest ($\mu$).
 # The impact of a NP is defined as the shift $ \Delta \mu$ induced as the NP is fixed to its $\pm 1 \sigma$ values, with all the other parameters profiled as normal.
+#
+# Another quantity worth checking is the pull, defined as $pull(\theta) = \frac{\hat{\theta} - \theta_0}{\sigma_0}$, which quantifies how far from its expected value we had to "pull" $\theta$ while finding the MLE.
 
 # %%
 # needed because of https://github.com/cms-analysis/HiggsAnalysis-CombinedLimit/issues/1049
