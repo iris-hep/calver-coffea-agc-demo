@@ -217,7 +217,7 @@ def calculate_m_reco_top(jets):
 
 class create_histograms(ProcessorABC):
     # create histograms with observables
-    def process(events):
+    def process(self, events):
         hist_4j1b = (
             hist.dask.Hist.new.Reg(11, 110, 550, name="HT", label=r"$H_T$ [GeV]")
             .StrCat([], name="process", label="Process", growth=True)
