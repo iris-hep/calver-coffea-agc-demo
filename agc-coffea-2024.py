@@ -347,7 +347,7 @@ tasks = dataset_tools.apply_to_fileset(create_histograms(), samples, uproot_opti
 # %%
 # %%time
 # execute
-((out, report),) = dask.compute(tasks)  # feels strange that this is a tuple-of-tuple
+out, report = dask.compute(*tasks)  # feels strange that this is a tuple-of-tuple
 
 print(f"total time spent in uproot reading data (or some related metric?): {ak.sum([v['duration'] for v in report.values()]):.2f} s")
 
