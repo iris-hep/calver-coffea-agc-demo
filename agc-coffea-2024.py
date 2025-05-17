@@ -59,6 +59,7 @@ import cloudpickle
 import matplotlib.pyplot as plt
 
 from coffea.nanoevents import NanoEventsFactory, NanoAODSchema
+from coffea.processor import ProcessorABC
 from coffea.analysis_tools import PackedSelection
 from coffea import dataset_tools
 import correctionlib
@@ -214,98 +215,101 @@ def calculate_m_reco_top(jets):
     return observable
 
 
-# create histograms with observables
-def create_histograms(events):
-    hist_4j1b = (
-        hist.dask.Hist.new.Reg(11, 110, 550, name="HT", label=r"$H_T$ [GeV]")
-        .StrCat([], name="process", label="Process", growth=True)
-        .StrCat([], name="variation", label="Systematic variation", growth=True)
-        .Weight()
-    )
-
-    hist_4j2b = (
-        hist.dask.Hist.new.Reg(11, 110, 550, name="m_reco_top", label=r"$m_{bjj}$ [GeV]")
-        .StrCat([], name="process", label="Process", growth=True)
-        .StrCat([], name="variation", label="Systematic variation", growth=True)
-        .Weight()
-    )
-
-    hist_dict = {"4j1b": hist_4j1b, "4j2b": hist_4j2b}
-
-    process = events.metadata["process"]  # "ttbar" etc.
-    variation = events.metadata["variation"]  # "nominal" etc.
-    #process_label = events.metadata["process_label"]  # nicer LaTeX labels
-
-    # normalization for MC
-    x_sec = events.metadata["xsec"]
-    nevts_total = events.metadata["nevts"]
-    lumi = 3378 # /pb
-    if process != "data":
-        xsec_weight = x_sec * lumi / nevts_total
-    else:
-        xsec_weight = 1
-
-    events["pt_scale_up"] = 1.03
-    events["pt_res_up"] = dak.map_partitions(rand_gauss, events.Jet.pt)
-
-    syst_variations = ["nominal"]
-    jet_kinematic_systs = ["pt_scale_up", "pt_res_up"]
-    event_systs = [f"btag_var_{i}" for i in range(4)]
-    if process == "wjets":
-        event_systs.append("scale_var")
+class create_histograms(ProcessorABC):
+    # create histograms with observables
+    def process(self, events):
+        hist_4j1b = (
+            hist.dask.Hist.new.Reg(11, 110, 550, name="HT", label=r"$H_T$ [GeV]")
+            .StrCat([], name="process", label="Process", growth=True)
+            .StrCat([], name="variation", label="Systematic variation", growth=True)
+            .Weight()
+        )
     
-    if variation == "nominal":
-        syst_variations.extend(jet_kinematic_systs)
-        syst_variations.extend(event_systs)
+        hist_4j2b = (
+            hist.dask.Hist.new.Reg(11, 110, 550, name="m_reco_top", label=r"$m_{bjj}$ [GeV]")
+            .StrCat([], name="process", label="Process", growth=True)
+            .StrCat([], name="variation", label="Systematic variation", growth=True)
+            .Weight()
+        )
     
-    for syst_var in syst_variations:
-        elecs = events.Electron
-        muons = events.Muon
-        jets = events.Jet
-
-        if syst_var in jet_kinematic_systs:
-            jets["pt"] = jets.pt * events[syst_var]
+        hist_dict = {"4j1b": hist_4j1b, "4j2b": hist_4j2b}
     
-        elecs, muons, jets = object_selection(elecs, muons, jets)
-
-        # region selection
-        selections = region_selection(elecs, muons, jets)
-
-        for region in hist_dict:
-            selection = selections.all(region)
-            region_jets = jets[selection]
-            region_weights = dak.ones_like(dak.num(region_jets, axis=1)) * xsec_weight
-            if region == "4j1b":
-                observable = ak.sum(region_jets.pt, axis=-1)
-            elif region == "4j2b":
-                observable = calculate_m_reco_top(region_jets)
-            syst_var_name = f"{syst_var}"
-            if syst_var in event_systs:
-                for i_dir, direction in enumerate(["up", "down"]):
-                    if syst_var == "scale_var":
-                        wgt_variation = cset["event_systematics"].evaluate("scale_var", direction, region_jets.pt[:, 0])
-                    elif syst_var.startswith("btag_var"):
-                        i_jet = int(syst_var.rsplit("_",1)[-1])
-                        wgt_variation = cset["event_systematics"].evaluate("btag_var", direction, region_jets.pt[:,i_jet])
-                    syst_var_name = f"{syst_var}_{direction}"
+        process = events.metadata["process"]  # "ttbar" etc.
+        variation = events.metadata["variation"]  # "nominal" etc.
+        #process_label = events.metadata["process_label"]  # nicer LaTeX labels
+    
+        # normalization for MC
+        x_sec = events.metadata["xsec"]
+        nevts_total = events.metadata["nevts"]
+        lumi = 3378 # /pb
+        if process != "data":
+            xsec_weight = x_sec * lumi / nevts_total
+        else:
+            xsec_weight = 1
+    
+        events["pt_scale_up"] = 1.03
+        events["pt_res_up"] = dak.map_partitions(rand_gauss, events.Jet.pt)
+    
+        syst_variations = ["nominal"]
+        jet_kinematic_systs = ["pt_scale_up", "pt_res_up"]
+        event_systs = [f"btag_var_{i}" for i in range(4)]
+        if process == "wjets":
+            event_systs.append("scale_var")
+        
+        if variation == "nominal":
+            syst_variations.extend(jet_kinematic_systs)
+            syst_variations.extend(event_systs)
+        
+        for syst_var in syst_variations:
+            elecs = events.Electron
+            muons = events.Muon
+            jets = events.Jet
+    
+            if syst_var in jet_kinematic_systs:
+                jets["pt"] = jets.pt * events[syst_var]
+        
+            elecs, muons, jets = object_selection(elecs, muons, jets)
+    
+            # region selection
+            selections = region_selection(elecs, muons, jets)
+    
+            for region in hist_dict:
+                selection = selections.all(region)
+                region_jets = jets[selection]
+                region_weights = dak.ones_like(dak.num(region_jets, axis=1)) * xsec_weight
+                if region == "4j1b":
+                    observable = ak.sum(region_jets.pt, axis=-1)
+                elif region == "4j2b":
+                    observable = calculate_m_reco_top(region_jets)
+                syst_var_name = f"{syst_var}"
+                if syst_var in event_systs:
+                    for i_dir, direction in enumerate(["up", "down"]):
+                        if syst_var == "scale_var":
+                            wgt_variation = cset["event_systematics"].evaluate("scale_var", direction, region_jets.pt[:, 0])
+                        elif syst_var.startswith("btag_var"):
+                            i_jet = int(syst_var.rsplit("_",1)[-1])
+                            wgt_variation = cset["event_systematics"].evaluate("btag_var", direction, region_jets.pt[:,i_jet])
+                        syst_var_name = f"{syst_var}_{direction}"
+                        hist_dict[region].fill(
+                            observable,
+                            process=process,
+                            variation=syst_var_name,
+                            weight=region_weights * wgt_variation,
+                        )
+                else:
+                    if variation != "nominal":
+                        syst_var_name = variation
                     hist_dict[region].fill(
                         observable,
                         process=process,
                         variation=syst_var_name,
-                        weight=region_weights * wgt_variation,
+                        weight=region_weights,
                     )
-            else:
-                if variation != "nominal":
-                    syst_var_name = variation
-                hist_dict[region].fill(
-                    observable,
-                    process=process,
-                    variation=syst_var_name,
-                    weight=region_weights,
-                )
+    
+        return hist_dict
 
-    return hist_dict
-
+    def postprocess(self, accumulator):
+        pass
 
 # %% [markdown]
 # and prepare the fileset we need. More information on how the dataset was prepared can be found [here](https://github.com/iris-hep/analysis-grand-challenge/blob/main/analyses/cms-open-data-ttbar/ttbar_analysis_pipeline.ipynb).
@@ -335,7 +339,7 @@ for k, v in samples.items():
 # %%time
 cloudpickle.register_pickle_by_value(utils) # serialize methods and objects in utils so that they can be accessed within the coffea processor
 # create the task graph
-tasks = dataset_tools.apply_to_fileset(create_histograms, samples, uproot_options={"allow_read_errors_with_report": True})
+tasks = dataset_tools.apply_to_fileset(create_histograms(), samples, uproot_options={"allow_read_errors_with_report": True})
 
 # %% [markdown]
 # and then we can finally execute the full task graph with Dask
@@ -343,7 +347,7 @@ tasks = dataset_tools.apply_to_fileset(create_histograms, samples, uproot_option
 # %%
 # %%time
 # execute
-((out, report),) = dask.compute(tasks)  # feels strange that this is a tuple-of-tuple
+out, report = dask.compute(*tasks)  # feels strange that this is a tuple-of-tuple
 
 print(f"total time spent in uproot reading data (or some related metric?): {ak.sum([v['duration'] for v in report.values()]):.2f} s")
 
